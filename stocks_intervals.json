@@ -1,14 +1,39 @@
 [
     {
         "intervals": [
-            "1h",
             "1d",
             "1wk",
             "1mo"
         ],
-        "stocks": [            
-            "MSFT",            
-            "NVDA"
+        "stocks": [
+            "GLOB",
+            "ENPH",
+            "DAVA",
+            "MELI",
+            "NVMI",
+            "PLTR",
+            "AAPL",
+            "AVGO",
+            "ABNB",
+            "MPWR",
+            "TSM",
+            "MSFT",
+            "DHI",
+            "DHR",
+            "TSLA",
+            "GOOG",
+            "AMD",
+            "FLNC",
+            "NVDA",
+            "RUN",
+            "DOCN",
+            "AMZN",
+            "AEHR",
+            "EMR",
+            "MOH",
+            "NXPI",
+            "RIVN",
+            "WYNN"
         ]
     }
 ]

@@ -1,11 +1,12 @@
 import dateutil.parser
 from datetime import datetime, timedelta
 import yfinance as yf
-from typing import List, Dict
+from typing import List, Dict, Union
 import json
 import os
 import sqlite3
 import pandas as pd
+import re
 
 
 def get_stocks_tickers_and_intervals(json_file_path: str) -> List[str]:
@@ -43,6 +44,56 @@ def get_stocks_tickers_and_intervals(json_file_path: str) -> List[str]:
 
     # Return the list of combinations
     return result
+
+
+def is_ticker_available(ticker: str) -> bool:
+    """
+    Verify if a stock ticker is available on Yahoo Finance.
+
+    Parameters:
+    - ticker (str): Stock ticker symbol.
+
+    Returns:
+    - bool: True if the ticker is available, False otherwise.
+    """
+    try:
+        # Create a Ticker object
+        stock = yf.Ticker(ticker)
+
+        # Download minimal data (1 month) to quickly check if the ticker is available
+        data = stock.history(period='1mo')
+
+        # Check if data is not empty
+        return not data.empty
+    except Exception as e:
+        # Handle exceptions, print the error, and return False
+        print(f"Error: {e}")
+        return False
+
+
+def filter_available_tickers(ticker_intervals: List[str]) -> List[str]:
+    """
+    Filter a list of stock ticker intervals to include only those available on Yahoo Finance.
+
+    Parameters:
+    - ticker_intervals (List[str]): List of stock ticker intervals (e.g., 'AAPL_1h').
+
+    Returns:
+    - List[str]: Filtered list of ticker intervals that are available on Yahoo Finance.
+    """
+
+    tickers = [item.split('_')[0] for item in ticker_intervals]
+
+    # Removes all items from a list that contain any character that is not a letter or digit.
+    tickers = [item for item in tickers if re.match(r'^[a-zA-Z0-9]+$', item)]
+
+    # Removes all items from a list that start with a number
+    tickers = [item for item in tickers if not item[0].isdigit()]
+
+    # Inline the get_ticker_from_interval logic in the list comprehension
+    available_ticker_intervals = [
+        ticker for ticker in tickers if is_ticker_available(ticker)]
+    return available_ticker_intervals
 
 
 def create_or_connect_to_database(db_file_path: str) -> None:
@@ -148,7 +199,7 @@ def update_stock_data(db_file_path: str) -> None:
     Parameters:
     - db_file_path (str): The path to the SQLite database file.
     """
-
+    
     try:
         # Connect to the SQLite database
         conn = sqlite3.connect(db_file_path)
@@ -174,8 +225,29 @@ def update_stock_data(db_file_path: str) -> None:
         for table_name in existing_tables:
             if any(table_name.endswith(interval) for interval in intervals_to_update):
                 ticker, interval = table_name.split("_")
+                ticker = ticker.replace('$', '-')
                 column_name = 'Datetime' if interval in [
                     '1m', '2m', '5m', '15m', '30m', '60m', '90m', '1h'] else 'Date'
+                
+                    # Define the maximum allowed period for each interval
+                max_nbr_days_dict = {
+                    '1m': 7,
+                    '2m': 60,
+                    '5m': 60,
+                    '15m': 60,
+                    '30m': 60,
+                    '60m': 730,
+                    '90m': 60,
+                    '1h': 730,
+                    '1d': None,
+                    '5d': None,
+                    '1wk': None,
+                    '1mo': None,
+                    '3mo': None
+                }
+
+                # Calculate start_date based on current date and maximum allowed period
+                max_period = max_nbr_days_dict.get(interval, None)
 
                 # Check if the table is empty
                 cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
@@ -183,7 +255,10 @@ def update_stock_data(db_file_path: str) -> None:
 
                 if count == 0:
                     # Table is empty, download data from '2022-01-01' until now
-                    start_date = '2022-01-01'
+                    if max_period is not None:
+                        start_date = (datetime.now() - timedelta(days=max_period-1)).strftime("%Y-%m-%d")
+                    else:
+                        start_date = datetime.now() - pd.DateOffset(365 * 10)
                 else:
                     # Table is not empty, get the last date or datetime
                     cursor.execute(
@@ -198,10 +273,16 @@ def update_stock_data(db_file_path: str) -> None:
                         start_date = (last_date_or_datetime + timedelta(days=0)).strftime(
                             "%Y-%m-%d")
                     else:
-                        start_date = '2022-01-01'
+                        if max_period is not None:
+                            start_date = (datetime.now() - timedelta(days=max_period-1)).strftime("%Y-%m-%d")
+                        else:
+                            start_date = start_date = datetime.now() - pd.DateOffset(365 * 10)
 
-                # Download data from start_date until now using Yahoo Finance API
-                df = yf.download(ticker, interval=interval, start=start_date)
+                # Download data from start_date until end_date using Yahoo Finance API
+                if start_date is not None:
+                    df = yf.download(ticker, interval=interval, start=start_date)
+                else:
+                    df = yf.download(ticker, interval=interval, end=datetime.now().strftime("%Y-%m-%d"))
 
                 # Format the index based on the column name
                 df.index = df.index.strftime(
@@ -236,3 +317,99 @@ def update_stock_data(db_file_path: str) -> None:
         # Close the database connection
         if conn:
             conn.close()
+
+# def update_stock_data(db_file_path: str) -> None:
+#     """
+#     Update stock data in SQLite tables based on intervals of existing tables.
+
+#     Parameters:
+#     - db_file_path (str): The path to the SQLite database file.
+#     """
+
+#     try:
+#         # Connect to the SQLite database
+#         conn = sqlite3.connect(db_file_path)
+#         cursor = conn.cursor()
+
+#         # Get existing tables in the database
+#         existing_tables = [table[0] for table in cursor.execute(
+#             "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+
+#         # Determine intervals to update based on existing tables
+#         intervals_to_update = set()
+#         for table_name in existing_tables:
+#             _, interval = table_name.split("_")
+#             intervals_to_update.add(interval)
+
+#         # Check for valid intervals
+#         valid_intervals = {'1m', '2m', '5m', '15m', '30m',
+#                            '60m', '90m', '1h', '1d', '5d', '1wk', '1mo', '3mo'}
+#         intervals_to_update = list(
+#             valid_intervals.intersection(intervals_to_update))
+
+#         # Proceed with updating data for each existing table
+#         for table_name in existing_tables:
+#             if any(table_name.endswith(interval) for interval in intervals_to_update):
+#                 ticker, interval = table_name.split("_")
+#                 column_name = 'Datetime' if interval in [
+#                     '1m', '2m', '5m', '15m', '30m', '60m', '90m', '1h'] else 'Date'
+
+#                 # Check if the table is empty
+#                 cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+#                 count = cursor.fetchone()[0]
+
+#                 if count == 0:
+#                     # Table is empty, download data from '2022-01-01' until now
+#                     start_date = '2022-01-01'
+#                 else:
+#                     # Table is not empty, get the last date or datetime
+#                     cursor.execute(
+#                         f"SELECT MAX({column_name}) FROM {table_name}")
+#                     last_record = cursor.fetchone()[0]
+
+#                     if last_record is not None:
+#                         last_date_or_datetime = dateutil.parser.parse(
+#                             last_record)
+#                         last_date_or_datetime = last_date_or_datetime.replace(
+#                             tzinfo=None)  # Remove timezone info
+#                         start_date = (last_date_or_datetime + timedelta(days=0)).strftime(
+#                             "%Y-%m-%d")
+#                     else:
+#                         start_date = '2022-01-01'
+
+#                 # Download data from start_date until now using Yahoo Finance API
+#                 df = yf.download(ticker, interval=interval, start=start_date)
+
+#                 # Format the index based on the column name
+#                 df.index = df.index.strftime(
+#                     "%Y-%m-%d" if column_name == 'Date' else "%Y-%m-%d %H:%M:%S")
+
+#                 # Remove the last record from the table
+#                 cursor.execute(
+#                     f"DELETE FROM {table_name} WHERE ROWID = (SELECT MAX(ROWID) FROM {table_name})")
+#                 conn.commit()
+
+#                 # Check if the data already exists in the table
+#                 existing_data = pd.read_sql(
+#                     f"SELECT {column_name} FROM {table_name}", conn)
+
+#                 existing_dates = set(existing_data[column_name])
+
+#                 # Filter out existing dates from the new data
+#                 df_to_append = df[~df.index.isin(existing_dates)]
+
+#                 # Append the new data to the SQLite table, if there is any new data
+#                 if not df_to_append.empty:
+#                     df_to_append.to_sql(
+#                         table_name, conn, if_exists='append', index=True, index_label=column_name)
+
+#                 print(f"Data for table '{table_name}' updated successfully.")
+
+#     except sqlite3.Error as e:
+#         # Handle SQLite errors
+#         print(f"SQLite error: {e}")
+
+#     finally:
+#         # Close the database connection
+#         if conn:
+#             conn.close()

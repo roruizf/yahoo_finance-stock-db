@@ -3,13 +3,14 @@ import time
 from db_funcs import *
 
 
-def run(json_file_path: str, db_file_path: str) -> None:
+def run(json_file_path: str, db_file_path: str, check_available_tickers: bool = False) -> None:
     """
     Run the main processing flow.
 
     Args:
         json_file_path (str): Path to the JSON file.
         db_file_path (str): Path to the SQLite database file.
+        check_available_tickers (bool): Filter a list of stock tickers to include only those available on Yahoo Finance. Default value: False
 
     Returns:
         None
@@ -27,12 +28,21 @@ def run(json_file_path: str, db_file_path: str) -> None:
             stocks_tickers_intervals_list = get_stocks_tickers_and_intervals(
                 json_file_path)
 
+            # Filter a list of stock tickers to include only those available on Yahoo Finance.
+            if check_available_tickers:
+                stocks_tickers_intervals_available_list = filter_available_tickers(
+                    stocks_tickers_intervals_list)
+            else:
+                stocks_tickers_intervals_available_list = stocks_tickers_intervals_list
+
             # Create or connect to the SQLite database
             create_or_connect_to_database(db_file_path)
 
             # Create stock tables in the database based on intervals
+            tables_list = [table.replace(
+                "-", "$") for table in stocks_tickers_intervals_available_list]
             create_stock_tables(
-                db_file_path, tables=stocks_tickers_intervals_list)
+                db_file_path, tables=tables_list)
 
             # Update stock data in the database
             update_stock_data(db_file_path)
@@ -61,7 +71,14 @@ if __name__ == '__main__':
     # Define file paths
     # Path to the JSON file containing stock data
     json_file_path = './stocks_intervals.json'
-    db_file_path = './yahoo_finance_stocks.db'  # Path to the SQLite database file
+    # json_file_path = './stocks_intervals_new.json'
+    # json_file_path = './stocks_intervals_sp500.json'
+    # json_file_path = './stocks_intervals_to_explore.json'
+    # Path to the SQLite database file
+    db_file_path = './yahoo_finance_stocks_1.db'
+    # db_file_path = './yahoo_finance_stocks_new.db'
+    # db_file_path = './yahoo_finance_stocks_sp500.db'
+    # db_file_path = './yahoo_finance_stocks_to_explore.db'  # Path to the SQLite database file
 
     # Run the main function with specified file paths
-    run(json_file_path, db_file_path)
+    run(json_file_path, db_file_path, False)
